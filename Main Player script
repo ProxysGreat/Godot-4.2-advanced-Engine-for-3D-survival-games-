@@ -1,0 +1,191 @@
+extends CharacterBody3D
+
+###################################################################################################
+########################################## VARIABLES AND COSTANTS #################################
+
+#Setting up stuff
+@onready var eyes = $Nek/Head/eyes
+@onready var head = $Nek/Head
+@onready var camera_3d = $Nek/Head/eyes/Camera3D
+@onready var fps_rig = $Nek/Head/eyes/Camera3D/BodyBobbing/fps_rig
+@onready var ray_cast_3d = $Nek/Head/eyes/Camera3D/RayCast3D
+@onready var player = $"."
+@onready var rig_pickaxe = $Nek/Head/eyes/Camera3D/BodyBobbing
+@onready var actions = $Nek/Head/eyes/Camera3D/BodyBobbing/fps_rig/Gun/ActionsPick
+@onready var melee = $Nek/Head/eyes/Camera3D/BodyBobbing/fps_rig/Gun/ActionsPick
+
+
+#BOB
+const head_bobbing_sprinting_speed = 18.0
+const head_bobbing_sprinting_intensity = 0.1   #THIS BOBBING IS FOR THE CAMERA
+const head_bobbing_intensity = 0.01    #THIS BOBBING IS FOR THE HANDS
+var head_bobbing_vector = Vector2.ZERO
+var head_bobbing_index = 0.0
+var air = false
+
+
+#VARIABLES
+
+var still = 0 #USED TO DETECT IF PLAYER IS MOVING AND CHANGE THE MOMENTUM ACCORDINGLY
+const sprspeed = 8 #MAX SPEED OF THE PLAYER
+var speed = 0 #CURRENT SPEED OF THE PLAYER
+const jump = 6.0 #JUMP FORCE
+var lerp_speed = 5.0     
+var lerp_speed2 = 3.0 
+const mouse_sens = 0.25 #SENS
+var direction = Vector3.ZERO
+
+#COMBO
+var combo = 0
+
+
+
+#IMPORTANT (USED TO DETERMINE THE EQUIPPED OBJECT)
+var CURRENT_ITEM = "Pickaxe" #CURRENT ITEM THAT IS BEING HELD
+var TYPEDMG = 10 #HOM MUCH DMG THE ITEM YOU'RE HOLDING DOES
+var TYPE = 0 #0 = Melee  1 = Ranged  2 = Item  3 = Building block
+var m1cooldown = 0
+
+
+##################################################################################################
+################################## GENERAL CODE (NO INV. OR SPECIFIC STUFF) #####################
+
+
+
+func _ready():
+	
+	#Makes mouse invis
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	$Nek/Head/eyes/Camera3D/BodyBobbing/fps_rig/Gun/Idles.play("Idle")
+	pass
+	
+#Moving the camera
+func _input(event):
+	if event is InputEventMouseMotion:
+		rotate_y(deg_to_rad(-event.relative.x * mouse_sens))
+		head.rotate_x(deg_to_rad(-event.relative.y * mouse_sens))
+		head.rotation.x = clamp(head.rotation.x, deg_to_rad(-89),deg_to_rad(89))
+		fps_rig.sway(Vector2(event.relative.x,event.relative.y))
+		
+
+####################################################################################################
+##### Commands and stuff, physics (NEARLY ALL SCRIPTS RELATED TO THE PLAYER RUN HERE) ##############
+
+func _physics_process(delta):
+	
+	#DETECTING USER INPUT
+	var input_dir = Input.get_vector("left", "right", "foward", "backward")
+	
+	#Managing the head BOBBBING
+	head_bobbing_index += head_bobbing_sprinting_speed*delta
+	
+	if is_on_floor and input_dir != Vector2.ZERO:
+		air = false
+		head_bobbing_vector.y = sin(head_bobbing_index)
+		head_bobbing_vector.x = sin(head_bobbing_index/2) + 0.5
+		
+		eyes.position.y = lerp(eyes.position.y,head_bobbing_vector.y*(head_bobbing_sprinting_intensity/2.0),delta*lerp_speed) 
+		eyes.position.x = lerp(eyes.position.x,head_bobbing_vector.x*head_bobbing_sprinting_intensity,delta*lerp_speed)
+		
+		if is_on_floor():
+			rig_pickaxe.position.y = lerp(rig_pickaxe.position.y,head_bobbing_vector.y*(head_bobbing_intensity/2.0),delta*lerp_speed2)
+			rig_pickaxe.position.x = lerp(rig_pickaxe.position.x,head_bobbing_vector.x*head_bobbing_intensity,delta*lerp_speed2)
+		
+		
+	#shorcut TO QUIT GAME
+	if Input.is_action_just_pressed("quit"):
+		get_tree().quit()
+	
+	#GRAVITY
+	if not is_on_floor():
+		velocity.y -= 13.0 * delta
+		air = true
+		
+	#MOMENTUM
+	if Input.is_action_pressed("foward") or Input.is_action_pressed("left") or Input.is_action_pressed("right") or Input.is_action_pressed("backward") and !still:
+		if speed < 14 and !still:
+			speed = speed + 0.01
+		elif speed > 8:
+			speed = speed - 0.5
+		elif speed < 8 and !still:
+			speed = 8
+	else:
+		speed = sprspeed
+		
+	###############################################################################################
+	#################################  ACTIONS ####################################################
+	
+	#JUMP
+	
+	if Input.is_action_pressed("ui_accept"):
+		if is_on_floor():
+			velocity.y = jump
+			if !actions.is_playing():
+				actions.play("Jump")
+			
+		else:
+			pass
+			
+	if Input.is_action_just_pressed("use") and TYPE < 1 and !m1cooldown:
+		combo = combo + 1
+		m1cooldown = 1
+		$Nek/Head/eyes/Camera3D/BodyBobbing/fps_rig/M1.start()
+		$Nek/Head/eyes/Camera3D/BodyBobbing/fps_rig/M1end.start()
+		
+		if combo < 0 and combo < 2:
+			melee.play("Use1")
+			melee.queue("Recover2")
+		elif combo < 1 and combo < 3:
+			melee.play("Use2")
+			melee.queue("Recover2")
+		elif combo < 2 and combo < 4:
+			melee.play("Use3")
+			melee.queue("Recover2")
+		elif combo < 3 and combo < 5:
+			melee.play("Use2")
+			melee.queue("Recover2")
+			combo = 0
+		
+		
+		
+	
+	##########################################################################################
+	################################### MOVEMENT #############################################
+	
+	#lerping movement to make it smoother and less clanky
+	
+	direction = lerp(direction,(transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized(),delta*lerp_speed)
+	
+	#Actually moving
+	
+	if direction:
+		
+		velocity.x = direction.x * speed
+		velocity.z = direction.z * speed
+		
+		
+		
+	else:
+		velocity.x = move_toward(velocity.x, 0, speed)
+		velocity.z = move_toward(velocity.z, 0, speed)
+		speed = sprspeed
+		
+	move_and_slide()
+	
+#############################################################################################
+######################################### COOLDOWNS #########################################
+
+
+
+
+
+
+
+
+func _on_m_1_timeout():
+	m1cooldown = 0
+
+
+#func _on_m_1_end_timeout():
+	#if !Input.is_action_just_pressed("use") and !m1cooldown:
+		#combo = 0
